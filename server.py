@@ -1,4 +1,4 @@
-```text
+
 import asyncio
 import os
 import struct
