@@ -1,13 +1,10 @@
-```python
 import asyncio
 import os
 import struct
 
-
 USERNAME = os.environ.get("USERNAME")
 PASSWORD = os.environ.get("PASSWORD")
 PORT = int(os.environ.get("PORT", "1080"))
-
 
 if not USERNAME or not PASSWORD:
     raise RuntimeError("USERNAME and PASSWORD environment variables are required")
@@ -20,13 +17,13 @@ async def read_exact(reader, size):
 async def authenticate(reader, writer):
     version = (await read_exact(reader, 1))[0]
 
-    if version != 0x05:
+    if version != 5:
         return False
 
     nmethods = (await read_exact(reader, 1))[0]
     methods = await read_exact(reader, nmethods)
 
-    if 0x02 not in methods:
+    if 2 not in methods:
         writer.write(b"\x05\xff")
         await writer.drain()
         return False
@@ -36,19 +33,17 @@ async def authenticate(reader, writer):
 
     auth_version = (await read_exact(reader, 1))[0]
 
-    if auth_version != 0x01:
+    if auth_version != 1:
         return False
 
     username_length = (await read_exact(reader, 1))[0]
     username = (await read_exact(reader, username_length)).decode(
-        "utf-8",
-        errors="replace",
+        "utf-8", errors="replace"
     )
 
     password_length = (await read_exact(reader, 1))[0]
     password = (await read_exact(reader, password_length)).decode(
-        "utf-8",
-        errors="replace",
+        "utf-8", errors="replace"
     )
 
     if username == USERNAME and password == PASSWORD:
@@ -58,51 +53,42 @@ async def authenticate(reader, writer):
 
     writer.write(b"\x01\x01")
     await writer.drain()
-
     return False
 
 
 async def handle_connect(reader, writer):
     version = (await read_exact(reader, 1))[0]
     command = (await read_exact(reader, 1))[0]
-    await read_exact(reader, 1)  # RSV
+    await read_exact(reader, 1)
     address_type = (await read_exact(reader, 1))[0]
 
-    if version != 0x05:
+    if version != 5:
         return None
 
-    # TCP CONNECT only
-    if command != 0x01:
+    if command != 1:
         writer.write(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
         await writer.drain()
         return None
 
-    if address_type == 0x01:
-        # IPv4
+    if address_type == 1:
         raw_address = await read_exact(reader, 4)
         destination = ".".join(str(x) for x in raw_address)
 
-    elif address_type == 0x03:
-        # Domain name
+    elif address_type == 3:
         length = (await read_exact(reader, 1))[0]
         raw_domain = await read_exact(reader, length)
 
-        # SOCKS5 domain names are ASCII-compatible.
-        # Do NOT use .decode("idna", errors="ignore").
         try:
             destination = raw_domain.decode("ascii")
         except UnicodeDecodeError:
             destination = raw_domain.decode("utf-8", errors="replace")
 
-    elif address_type == 0x04:
-        # IPv6
+    elif address_type == 4:
         raw_address = await read_exact(reader, 16)
-
         groups = [
             f"{raw_address[i]:02x}{raw_address[i + 1]:02x}"
             for i in range(0, 16, 2)
         ]
-
         destination = ":".join(groups)
 
     else:
@@ -133,12 +119,11 @@ async def relay(reader, writer):
 
 async def handle_client(reader, writer):
     remote_writer = None
-
     peer = writer.get_extra_info("peername")
+
     print(f"New SOCKS5 connection: {peer}", flush=True)
 
     try:
-        # SOCKS5 authentication
         authenticated = await asyncio.wait_for(
             authenticate(reader, writer),
             timeout=15,
@@ -150,7 +135,6 @@ async def handle_client(reader, writer):
 
         print(f"Authentication successful: {peer}", flush=True)
 
-        # SOCKS5 CONNECT request
         target = await asyncio.wait_for(
             handle_connect(reader, writer),
             timeout=15,
@@ -178,21 +162,16 @@ async def handle_client(reader, writer):
 
         except Exception as exc:
             print(
-                f"Connection to destination failed: "
+                f"Connection failed to "
                 f"{destination}:{destination_port} - {exc}",
                 flush=True,
             )
 
-            writer.write(
-                b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00"
-            )
+            writer.write(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
             await writer.drain()
             return
 
-        # SOCKS5 success
-        writer.write(
-            b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00"
-        )
+        writer.write(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
         await writer.drain()
 
         print(
@@ -206,13 +185,22 @@ async def handle_client(reader, writer):
         )
 
     except asyncio.IncompleteReadError:
-        print(f"Client disconnected during handshake: {peer}", flush=True)
+        print(
+            f"Client disconnected during handshake: {peer}",
+            flush=True,
+        )
 
     except asyncio.TimeoutError:
-        print(f"SOCKS5 handshake timeout: {peer}", flush=True)
+        print(
+            f"SOCKS5 handshake timeout: {peer}",
+            flush=True,
+        )
 
     except ConnectionError as exc:
-        print(f"Connection error from {peer}: {exc}", flush=True)
+        print(
+            f"Connection error from {peer}: {exc}",
+            flush=True,
+        )
 
     except Exception as exc:
         print(
@@ -243,18 +231,13 @@ async def handle_client(reader, writer):
 async def main():
     server = await asyncio.start_server(
         handle_client,
-        host="0.0.0.0",
-        port=PORT,
+        "0.0.0.0",
+        PORT,
         limit=65536,
     )
 
-    addresses = ", ".join(
-        str(sock.getsockname())
-        for sock in server.sockets
-    )
-
     print(
-        f"SOCKS5 server listening on {addresses}",
+        f"SOCKS5 server listening on ('0.0.0.0', {PORT})",
         flush=True,
     )
 
@@ -269,4 +252,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-```
