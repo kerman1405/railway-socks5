@@ -1,2 +1,3 @@
-asyncio-socks-server==1.3.2
+# No external dependencies required
+
 
